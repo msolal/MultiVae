@@ -23,7 +23,7 @@ logger.setLevel(logging.INFO)
 
 class MMNISTDataset(MultimodalBaseDataset):
     """
-    Multimodal MMNIST Dataset to load the Polymnist Dataset from
+    Multimodal PolyMNIST Dataset from
     'Generalized Multimodal Elbo' Sutter et al 2021.
 
     """
@@ -43,7 +43,7 @@ class MMNISTDataset(MultimodalBaseDataset):
             data_path (str) : The path where to find the MMNIST folder containing the folders 'train' or 'test'.
                 The data used is the one that can be downloaded from https://zenodo.org/record/4899160#.YLn0rKgzaHu
                 If data_path doesn't contain the dataset and download is set to True, then the data can be downloaded
-                for you using gdown.
+                automatically using gdown. For that, set download to True.
             transform: tranforms on colored MNIST digits.
             target_transform: transforms on labels.
             split (Literal['train', 'test']). Which part of the data to use.
@@ -73,11 +73,11 @@ class MMNISTDataset(MultimodalBaseDataset):
 
         self.__check_or_download_data__(data_path, unimodal_datapaths)
 
-        self.m0 = torch.load(unimodal_datapaths[0])
-        self.m1 = torch.load(unimodal_datapaths[1])
-        self.m2 = torch.load(unimodal_datapaths[2])
-        self.m3 = torch.load(unimodal_datapaths[3])
-        self.m4 = torch.load(unimodal_datapaths[4])
+        self.m0 = torch.load(unimodal_datapaths[0], weights_only=True)
+        self.m1 = torch.load(unimodal_datapaths[1], weights_only=True)
+        self.m2 = torch.load(unimodal_datapaths[2], weights_only=True)
+        self.m3 = torch.load(unimodal_datapaths[3], weights_only=True)
+        self.m4 = torch.load(unimodal_datapaths[4], weights_only=True)
 
         self.images_dict = {
             "m0": self.m0,
@@ -89,7 +89,7 @@ class MMNISTDataset(MultimodalBaseDataset):
 
         label_datapaths = os.path.join(data_path, "MMNIST", split, "labels.pt")
 
-        self.labels = torch.load(label_datapaths)
+        self.labels = torch.load(label_datapaths, weights_only=True)
 
         assert self.m0.shape[0] == self.labels.shape[0]
         self.num_files = self.labels.shape[0]

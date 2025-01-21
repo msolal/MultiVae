@@ -1,4 +1,5 @@
 import os
+from typing import Union
 
 import torch
 from PIL import Image
@@ -10,6 +11,7 @@ from multivae.data.datasets.utils import adapt_shape
 from multivae.data.utils import set_inputs_to_device
 from multivae.metrics.base.evaluator_config import EvaluatorConfig
 from multivae.models.base import BaseMultiVAE, ModelOutput
+from multivae.models.cvae import CVAE
 from multivae.samplers.base import BaseSampler
 
 from ..base.evaluator_class import Evaluator
@@ -29,11 +31,38 @@ class Visualization(Evaluator):
             Optional.
         sampler (BaseSampler) : The sampler to use for joint generation. Optional. If None is
             provided, the sampler is used.
+
+    .. code-block::
+
+            >>> from multivae.metrics.visualization import Visualization, VisualizationConfig
+
+
+            >>> vis_config = VisualizationConfig(
+            ...                    wandb_path='your_wandb_path', # optional, if you have initialized a wandb run
+            ...                     n_samples=5, # number of generated samples
+            ...                     n_data_cond=8, # For conditional generation, the number of datapoints to use.
+            ...                     )
+
+            >>> vis_module = Visualization(
+            ...                    model,
+            ...                    test_dataset=test_set,
+            ...                    output='./metrics',
+            ...                    eval_config=vis_config)
+
+            # Compute conditional generations
+            >>> generations = vis_module.conditional_samples_subset(['name_of_conditioning_modality1'])
+
+            # Compute unconditional generations
+            >>> generations = vis_module.unconditional_samples()
+
+
+
+
     """
 
     def __init__(
         self,
-        model: BaseMultiVAE,
+        model: Union[BaseMultiVAE, CVAE],
         test_dataset: MultimodalBaseDataset,
         output: str = None,
         eval_config=VisualizationConfig(),
@@ -44,6 +73,13 @@ class Visualization(Evaluator):
         self.n_data_cond = eval_config.n_data_cond
 
     def unconditional_samples(self, **kwargs):
+        """Generate an image of unconditional samples.
+
+
+        Returns:
+            PIL.Image: An image containing a grid of the generated samples.
+        """
+
         device = kwargs.pop("device", "cuda" if torch.cuda.is_available() else "cpu")
         if self.sampler is None:
             samples = self.model.generate_from_prior(self.n_samples)
@@ -52,8 +88,14 @@ class Visualization(Evaluator):
         from multivae.data.utils import set_inputs_to_device
 
         samples = set_inputs_to_device(samples, device=device)
-        images = self.model.decode(samples)
-        recon, shape = adapt_shape(images)
+        recon = self.model.decode(samples)
+
+        if hasattr(self.test_dataset, "transform_for_plotting"):
+            recon = {
+                m: self.test_dataset.transform_for_plotting(recon[m], m) for m in recon
+            }
+
+        recon, shape = adapt_shape(recon)
 
         recon_image = torch.cat(list(recon.values()))
 
@@ -80,21 +122,50 @@ class Visualization(Evaluator):
 
         return recon_image
 
-    def conditional_samples_subset(self, subset, gen_mod="all"):
-        dataloader = DataLoader(self.test_dataset, batch_size=self.n_data_cond)
+    def conditional_samples_subset(
+        self, subset: list, gen_mod: Union[list, str] = "all"
+    ):
+        """Generate samples conditioning on the modalities in a subset.
+
+        Args:
+            subset (list): The subset of modalities to condition on.
+            gen_mod (Union[list, str], optional): The modalities to generate. Defaults to "all".
+
+        Returns:
+            PIL.Image : a PIL image containing a grid of the generated samples.
+        """
+
+        dataloader = DataLoader(
+            self.test_dataset, batch_size=self.n_data_cond, shuffle=True
+        )
         data = next(iter(dataloader))
         # set inputs to device
-        data = set_inputs_to_device(data, self.device)
+        # data = set_inputs_to_device(data, self.device)
 
         recon = self.model.predict(
             data,
-            subset,
-            gen_mod,
+            cond_mod=subset,
+            gen_mod=gen_mod,
             N=self.n_samples,
             flatten=True,
             ignore_incomplete=True,
         )
-        recon.update({f"original_{m}": data.data[m] for m in subset})
+
+        if hasattr(self.test_dataset, "transform_for_plotting"):
+            recon = {
+                m: self.test_dataset.transform_for_plotting(recon[m], m) for m in recon
+            }
+            recon.update(
+                {
+                    f"original_{m}": self.test_dataset.transform_for_plotting(
+                        data.data[m], m
+                    )
+                    for m in subset
+                }
+            )
+        else:
+            recon.update({f"original_{m}": data.data[m] for m in subset})
+
         recon, shape = adapt_shape(recon)
         recon_image = [recon[f"original_{m}"] for m in subset]
 
@@ -127,6 +198,10 @@ class Visualization(Evaluator):
             )
 
         return recon_image
+
+    def reconstruction(self, modality: str, **kwargs):
+
+        return self.conditional_samples_subset([modality], gen_mod=modality)
 
     def eval(self):
         image = self.unconditional_samples()

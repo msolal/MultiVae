@@ -16,7 +16,7 @@ class JNFDccaConfig(BaseJointModelConfig):
             (see : https://proceedings.mlr.press/v162/javaloy22a.html).
             The inputs_dim must be provided to compute the likelihoods rescalings. Default to False.
         decoders_dist (Dict[str, Union[function, str]]). The decoder distributions to use per modality.
-            Per modality, you can provide a string in ['normal','bernoulli','laplace']. For Bernoulli distribution,
+            Per modality, you can provide a string in ['normal','bernoulli','laplace','categorical']. For Bernoulli distribution,
             the decoder is expected to output **logits**. If None is provided, a normal distribution is used for each modality.
         decoder_dist_params (Dict[str,dict]) : Parameters for the output decoder distributions, for
             computing the log-probability.
@@ -28,7 +28,7 @@ class JNFDccaConfig(BaseJointModelConfig):
         embedding_dcca_dim (int) : The dimension of the DCCA embedding to use. Default to 20.
         use_all_singular_values (bool) : Wether to use all the singular values for the computation of the objective.
             Using True is more unstable. Default to False.
-        apply_rescaling (bool) : If True, a MinMaxScaling is applied to the DCCA embeddings before training the rest of the model.
+        apply_rescaling_dcca (bool) : If True, a MinMaxScaling is applied to the DCCA embeddings before training the rest of the model.
             Default to False.
         beta (float) :Weighing factor for the regularization of the joint VAE. Default to 1.
 
@@ -40,5 +40,5 @@ class JNFDccaConfig(BaseJointModelConfig):
     use_all_singular_values: bool = (
         False  # Using True generally leads to NaN in the loss.
     )
-    apply_rescaling: bool = False
+    apply_rescaling_dcca: bool = False
     beta: float = 1.0
