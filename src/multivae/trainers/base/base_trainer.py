@@ -618,6 +618,9 @@ class BaseTrainer:
         epoch_metrics = {}
 
         for inputs in self.eval_loader:
+
+            torch.cuda.empty_cache() 
+
             inputs = set_inputs_to_device(inputs, device=self.device)
 
             try:
@@ -651,6 +654,8 @@ class BaseTrainer:
                 raise ArithmeticError("NaN detected in eval loss")
 
             self.callback_handler.on_eval_step_end(training_config=self.training_config)
+
+        torch.cuda.empty_cache()
 
         epoch_metrics = {
             k: epoch_metrics[k] / len(self.eval_loader) for k in epoch_metrics
@@ -812,82 +817,84 @@ class BaseTrainer:
     def predict(self, model: BaseModel, epoch: int, n_data=8):
         """For BaseMultiVaE models, compute self and cross reconstructions during training."""
 
-        model.eval()
+        with torch.no_grad(): 
 
-        predict_dataset = self.eval_dataset if self.eval_dataset is not None else self.train_dataset
+            model.eval()
 
-        # Take one sample with n_data datapoints
-        inputs = next(iter(DataLoader(predict_dataset, batch_size=n_data)))
-        inputs = set_inputs_to_device(inputs, self.device)
+            predict_dataset = self.eval_dataset if self.eval_dataset is not None else self.train_dataset
 
-        all_recons = {'images' : {}}
+            # Take one sample with n_data datapoints
+            inputs = next(iter(DataLoader(predict_dataset, batch_size=n_data)))
+            inputs = set_inputs_to_device(inputs, self.device)
 
-        # For multimodal VAEs we compute all 1-to-1 cross-modal reconstruction
-        if isinstance(model, BaseMultiVAE):
-            for mod in inputs.data:
-                recon = model.predict(
-                    inputs, mod, "all", N=8, flatten=True, ignore_incomplete=True
-                )
-                if hasattr(predict_dataset, "transform_for_plotting"):
-                    recon = {
-                        mod_name: predict_dataset.transform_for_plotting(
-                            recon[mod_name], modality=mod_name
+            all_recons = {'images' : {}}
+
+            # For multimodal VAEs we compute all 1-to-1 cross-modal reconstruction
+            if isinstance(model, BaseMultiVAE):
+                for mod in inputs.data:
+                    recon = model.predict(
+                        inputs, mod, "all", N=8, flatten=True, ignore_incomplete=True
+                    )
+                    if hasattr(predict_dataset, "transform_for_plotting"):
+                        recon = {
+                            mod_name: predict_dataset.transform_for_plotting(
+                                recon[mod_name], modality=mod_name
+                            )
+                            for mod_name in recon
+                        }
+                        recon["true_data"] = predict_dataset.transform_for_plotting(
+                            inputs.data[mod], modality=mod
                         )
-                        for mod_name in recon
-                    }
-                    recon["true_data"] = predict_dataset.transform_for_plotting(
-                        inputs.data[mod], modality=mod
-                    )
-                else:
-                    recon["true_data"] = inputs.data[mod]
-                recon, _ = adapt_shape(recon)
-                recon_image = [recon["true_data"]] + [
-                    recon[m] for m in recon if m != "true_data"
-                ]
-                recon_image = torch.cat(recon_image)
+                    else:
+                        recon["true_data"] = inputs.data[mod]
+                    recon, _ = adapt_shape(recon)
+                    recon_image = [recon["true_data"]] + [
+                        recon[m] for m in recon if m != "true_data"
+                    ]
+                    recon_image = torch.cat(recon_image)
 
-                # Transform to PIL format
-                recon_image = make_grid(recon_image, nrow=n_data)
-                # Add 0.5 after unnormalizing to [0, 255] to round to nearest integer
-                
-                all_recons['images'][f'recon_from_{mod}'] = recon_image
+                    # Transform to PIL format
+                    recon_image = make_grid(recon_image, nrow=n_data)
+                    # Add 0.5 after unnormalizing to [0, 255] to round to nearest integer
+                    
+                    all_recons['images'][f'recon_from_{mod}'] = recon_image
 
-        # For multimodal VAE or CVAE model, we compute the joint reconstruction
-        recon = model.predict(
-            inputs=inputs, cond_mod="all", gen_mod="all", N=8, flatten=True, ignore_incomplete=True
-        )
-        reconstructed_modalities = list(recon.keys())
-        if hasattr(predict_dataset, "transform_for_plotting"):
-            recon = {
-                mod_name: predict_dataset.transform_for_plotting(
-                    recon[mod_name], modality=mod_name
-                )
-                for mod_name in recon
-            }
-            recon.update(
-                {
-                    f"true_data_{mod_name}": predict_dataset.transform_for_plotting(
-                        inputs.data[mod_name], modality=mod_name
+            # For multimodal VAE or CVAE model, we compute the joint reconstruction
+            recon = model.predict(
+                inputs=inputs, cond_mod="all", gen_mod="all", N=8, flatten=True, ignore_incomplete=True
+            )
+            reconstructed_modalities = list(recon.keys())
+            if hasattr(predict_dataset, "transform_for_plotting"):
+                recon = {
+                    mod_name: predict_dataset.transform_for_plotting(
+                        recon[mod_name], modality=mod_name
                     )
-                    for mod_name in inputs.data
+                    for mod_name in recon
                 }
-            )
+                recon.update(
+                    {
+                        f"true_data_{mod_name}": predict_dataset.transform_for_plotting(
+                            inputs.data[mod_name], modality=mod_name
+                        )
+                        for mod_name in inputs.data
+                    }
+                )
 
-        else:
-            recon.update(
-                {f"true_data_{mod_name}": inputs.data[mod_name] for mod_name in inputs.data}
-            )
+            else:
+                recon.update(
+                    {f"true_data_{mod_name}": inputs.data[mod_name] for mod_name in inputs.data}
+                )
 
-        recon, _ = adapt_shape(recon)
-        recon_image = [recon[f"true_data_{m}"] for m in inputs.data] + [
-            recon[m] for m in reconstructed_modalities
-        ]
-        recon_image = torch.cat(recon_image)
+            recon, _ = adapt_shape(recon)
+            recon_image = [recon[f"true_data_{m}"] for m in inputs.data] + [
+                recon[m] for m in reconstructed_modalities
+            ]
+            recon_image = torch.cat(recon_image)
 
-        # Transform to PIL format
-        recon_image = make_grid(recon_image, nrow=n_data)
-        # Add 0.5 after unnormalizing to [0, 255] to round to nearest integer
-        
-        all_recons['images']["recon_from_all"] = recon_image
+            # Transform to PIL format
+            recon_image = make_grid(recon_image, nrow=n_data)
+            # Add 0.5 after unnormalizing to [0, 255] to round to nearest integer
+            
+            all_recons['images']["recon_from_all"] = recon_image
 
-        return all_recons
+            return all_recons
